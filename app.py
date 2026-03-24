@@ -2,68 +2,112 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os
-from langchain_groq import Cha
-Groq
+from langchain_huggingface import HuggingFaceEndpoint
 from langchain_experimental.agents import create_pandas_dataframe_agent
 
-# Page Setup
-st.set_page_config(page_title="OpenSource Data AI", layout="wide")
-st.title("📊 AI Data Analysis Dashboard")
+# --- 1. SETTINGS & AUTHENTICATION ---
+st.set_page_config(page_title="Free AI Data Studio", layout="wide")
+st.title("📊 Free Open-Source Data Analyst")
 
-# Security: Get the Open Source API Key from Streamlit/GitHub Secrets
-if "GROQ_API_KEY" in st.secrets:
-    api_key = st.secrets["GROQ_API_KEY"]
+# Look for the API key in Streamlit Secrets (for GitHub Deployment)
+if "HUGGINGFACEHUB_API_TOKEN" in st.secrets:
+    hf_token = st.secrets["HUGGINGFACEHUB_API_TOKEN"]
 else:
-    api_key = st.sidebar.text_input("Enter Groq API Key", type="password")
-# Sidebar File Upload
-uploaded_file = st.sidebar.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"])
+    st.sidebar.warning("API Token not found in Secrets.")
+    hf_token = st.sidebar.text_input("Paste Hugging Face Token", type="password")
+
+# --- 2. DATA INPUT SECTION ---
+st.sidebar.header("Step 1: Upload Data")
+uploaded_file = st.sidebar.file_uploader("Upload a CSV or Excel file", type=["csv", "xlsx"])
 
 if uploaded_file:
-    # Read the data
-    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+    # Load data into a DataFrame (df)
+    if uploaded_file.name.endswith('.csv'):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
+
+    # --- 3. DATA ANALYSIS (DESCRIBING DATA) ---
+    st.subheader("📋 Data Overview & Statistics")
+    col_pre1, col_pre2 = st.columns([1, 1])
     
-    # 1. Data Analysis (Describing Data)
-    st.write("### 📋 Data Preview & Summary")
-    col_a, col_b = st.columns(2)
-    with col_a:
+    with col_pre1:
+        st.write("**Data Preview (Top 5 Rows):**")
         st.dataframe(df.head(5))
-    with col_b:
-        st.write(df.describe()) # This 'describes' the math (mean, min, max)
-# 2. Graphing Section
+    
+    with col_pre2:
+        st.write("**Statistical Summary (Describe):**")
+        st.write(df.describe())
+
     st.divider()
+
+    # --- 4. VISUALIZATION SUITE (GRAPHS) ---
     st.subheader("📈 Visualization Lab")
-    
     viz_col1, viz_col2 = st.columns([1, 2])
-    
+
     with viz_col1:
-        chart_type = st.selectbox("Pick a Graph", ["Bar", "Line", "Scatter", "Pie"])
-        x_axis = st.selectbox("Select X Axis", df.columns)
-        y_axis = st.selectbox("Select Y Axis", df.columns)
-    
+        st.write("### Chart Settings")
+        chart_type = st.selectbox("Select Chart Type", ["Bar", "Line", "Scatter", "Histogram", "Pie"])
+        x_axis = st.selectbox("Select X-Axis", df.columns)
+        y_axis = st.selectbox("Select Y-Axis", df.columns)
+        chart_color = st.color_picker("Pick Chart Color", "#3498db")
+
     with viz_col2:
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
         if chart_type == "Bar":
-            sns.barplot(x=df[x_axis], y=df[y_axis], ax=ax)
+            sns.barplot(data=df, x=x_axis, y=y_axis, ax=ax, color=chart_color)
         elif chart_type == "Line":
-            sns.lineplot(x=df[x_axis], y=df[y_axis], ax=ax)
+            sns.lineplot(data=df, x=x_axis, y=y_axis, ax=ax, color=chart_color)
         elif chart_type == "Scatter":
-            sns.scatterplot(x=df[x_axis], y=df[y_axis], ax=ax)
+            sns.scatterplot(data=df, x=x_axis, y=y_axis, ax=ax, color=chart_color)
+        elif chart_type == "Histogram":
+            sns.histplot(df[x_axis], ax=ax, color=chart_color, kde=True)
         elif chart_type == "Pie":
             df[x_axis].value_counts().plot.pie(autopct='%1.1f%%', ax=ax)
+            ax.set_ylabel('') # Removes ugly overlapping label
+            
+        plt.xticks(rotation=45)
         st.pyplot(fig)
-      # 3. Chatbot Integration
+
     st.divider()
-    st.subheader("🤖 Chat with your Data")
+
+    # --- 5. AI CHATBOT INTEGRATION ---
+    st.subheader("🤖 Chat with Your Dataset")
     
-    if api_key:
-        llm = ChatGroq(groq_api_key=api_key, model_name="llama-3.3-70b-versatile")
-        agent = create_pandas_dataframe_agent(llm, df, allow_dangerous_code=True)
+    if hf_token:
+        # We use Mistral 7B - a top-tier open source model
+        repo_id = "mistralai/Mistral-7B-Instruct-v0.3"
         
-        user_query = st.text_input("Ask a question (e.g., 'Filter rows where Sales > 100')")
-        if user_query:
-            with st.spinner("AI is analyzing..."):
-                response = agent.run(user_query)
-                st.write(response)
+        try:
+            llm = HuggingFaceEndpoint(
+                repo_id=repo_id,
+                huggingfacehub_api_token=hf_token,
+                temperature=0.1,
+                max_new_tokens=512
+            )
+            
+            # The Agent acts as the bridge between the LLM and your Data
+            agent = create_pandas_dataframe_agent(
+                llm, 
+                df, 
+                verbose=True, 
+                allow_dangerous_code=True,
+                handle_parsing_errors=True
+            )
+            
+            user_query = st.text_input("Ask a question about your data (e.g., 'Filter for high values', 'What is the correlation?')")
+            
+            if user_query:
+                with st.spinner("AI is analyzing your table..."):
+                    response = agent.run(user_query)
+                    st.success(response)
+                    
+        except Exception as e:
+            st.error(f"AI Connection Error: {e}")
     else:
-        st.warning("Please provide an API Key to use the Chatbot.")
+        st.info("Provide a Hugging Face Token in the sidebar to enable the Chatbot.")
+
+else:
+    # Instructions for when no file is uploaded
+    st.info("Welcome! Please upload a CSV or Excel file in the sidebar to begin your analysis.")
